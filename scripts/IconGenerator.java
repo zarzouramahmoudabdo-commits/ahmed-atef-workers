@@ -113,7 +113,7 @@ public class IconGenerator {
         File colors = new File(res, "values");
         colors.mkdirs();
         java.nio.file.Files.writeString(
-            new File(colors, "ic_launcher_colors.xml").toPath(),
+            new File(colors, "worker_icon_colors.xml").toPath(),
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
             "<resources><color name=\"ic_launcher_background\">#101F3D</color></resources>\n");
 
