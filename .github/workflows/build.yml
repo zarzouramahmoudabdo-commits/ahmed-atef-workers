@@ -1,0 +1,102 @@
+name: build
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env: { PGHOST: localhost, PGUSER: postgres, PGPASSWORD: postgres }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm install
+      - name: اختبارات الحسابات والواجهة
+        run: npm test
+      - name: اختبارات قاعدة البيانات (القيود والصلاحيات)
+        run: ./scripts/test-sql.sh
+
+  apk:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - name: الإصدار
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF_NAME#v}"; else V="$(node -p "require('./package.json').version")-dev"; fi
+          echo "APP_VERSION=$V" >> $GITHUB_ENV
+      - run: npm install
+      - run: npm run build
+      - name: إنشاء مشروع Android ومزامنته
+        run: |
+          npx cap add android
+          npx cap sync android
+          sed -i "s/versionCode [0-9]*/versionCode ${GITHUB_RUN_NUMBER}/; s/versionName \".*\"/versionName \"${APP_VERSION}\"/" android/app/build.gradle
+      - name: بناء APK موقّع (إن توفر مفتاح التوقيع) أو Debug
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          cd android
+          APK="$GITHUB_WORKSPACE/AhmedAtefWorkers-${APP_VERSION}.apk"
+          if [ -n "$KEYSTORE_B64" ]; then
+            ./gradlew --no-daemon assembleRelease
+            BT="$ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | sort -V | tail -1)"
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            "$BT/zipalign" -f -p 4 app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
+            "$BT/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias "$KEY_ALIAS" \
+              --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEY_PASSWORD --out "$APK" "$RUNNER_TEMP/aligned.apk"
+            "$BT/apksigner" verify --print-certs "$APK" | head -3
+            rm -f "$RUNNER_TEMP/release.jks"
+          else
+            echo "::warning::لا يوجد مفتاح توقيع (KEYSTORE_B64). تم بناء نسخة Debug فقط ولا تصلح للتحديث."
+            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "::error::الإصدارات الرسمية تتطلب مفتاح التوقيع"; exit 1; fi
+            ./gradlew --no-daemon assembleDebug
+            cp app/build/outputs/apk/debug/app-debug.apk "$APK"
+          fi
+      - name: ملف التحديث update.json
+        run: |
+          SHA=$(sha256sum "AhmedAtefWorkers-${APP_VERSION}.apk" | cut -d' ' -f1)
+          TAG="v${APP_VERSION}"
+          NOTES="${{ github.event.head_commit.message }}"
+          node -e '
+            const [v,tag,sha,notes,repo,code]=process.argv.slice(1);
+            require("fs").writeFileSync("update.json", JSON.stringify({version:v,versionCode:+code,apkUrl:`https://github.com/${repo}/releases/download/${tag}/AhmedAtefWorkers-${v}.apk`,sha256:sha,notes},null,2));
+          ' "$APP_VERSION" "$TAG" "$SHA" "$NOTES" "$GITHUB_REPOSITORY" "$GITHUB_RUN_NUMBER"
+          cat update.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AhmedAtefWorkers-apk
+          path: |
+            AhmedAtefWorkers-*.apk
+            update.json
+      - name: نشر الإصدار
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            AhmedAtefWorkers-*.apk
+            update.json

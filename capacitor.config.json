@@ -1,0 +1,6 @@
+{
+  "appId": "com.ahmedatef.workers",
+  "appName": "أحمد عاطف لإدارة العمال",
+  "webDir": "www",
+  "plugins": { "CapacitorHttp": { "enabled": true } }
+}
