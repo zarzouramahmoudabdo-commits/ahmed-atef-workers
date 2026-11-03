@@ -98,7 +98,7 @@ V.workerForm = async () => {
 <p class="muted">تغيير الأسعار يسري على السجلات الجديدة فقط.</p>
 <label>ملاحظات</label><textarea id="f_notes">${esc(w.notes)}</textarea>
 <button data-act="saveWorker" style="width:100%">حفظ</button></div>
-${w.id ? `<button class="${w.status === 'active' ? 'red' : ''}" data-act="toggleArchive" style="width:100%">${w.status === 'active' ? 'أرشفة العامل' : 'استعادة العامل'}</button>` : ''}`);
+${w.id ? `<button class="${w.status === 'active' ? 'red' : ''}" data-act="toggleArchive" style="width:100%">${w.status === 'active' ? 'أرشفة العامل' : 'استعادة العامل'}</button><button class="red" data-act="deleteWorker" style="width:100%;margin-top:10px">حذف العامل نهائياً</button>` : ''}`);
 };
 
 V.attendance = async () => {
@@ -227,6 +227,17 @@ const A = {
   }, 'تم الحفظ'),
   toggleArchive: () => { const w = S.workers.find((x) => x.id === S.param); if (!confirm(w.status === 'active' ? 'أرشفة العامل؟ تبقى كل حساباته محفوظة.' : 'استعادة العامل؟')) return;
     safe(async () => { await ok(sb.from('workers').update({ status: w.status === 'active' ? 'archived' : 'active' }).eq('id', w.id)); go('workers'); }, 'تم'); },
+  deleteWorker: () => {
+    const w = S.workers.find((x) => x.id === S.param);
+    if (!w) return;
+    if (!confirm(`تحذير: سيتم حذف العامل "${w.full_name}" نهائياً، مع كل سجلات الحضور والسهرات والسلف والخصومات والمدفوعات. لا يمكن التراجع عن الحذف. هل أنت متأكد؟`)) return;
+    if (!confirm('تأكيد أخير: هل تريد مسح جميع بيانات هذا العامل نهائياً؟')) return;
+    safe(async () => {
+      await ok(sb.rpc('delete_worker', { p_worker: w.id }));
+      S.param = null;
+      go('workers');
+    }, 'تم حذف العامل وجميع سجلاته نهائياً');
+  },
   att: (el) => safe(async () => {
     const args = { p_worker: el.dataset.w, p_date: S.date, p_status: el.dataset.s, p_notes: null, p_cancel_overtime: false };
     try { await ok(sb.rpc('set_attendance', args)); }
