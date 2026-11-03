@@ -50,7 +50,7 @@ public class IconGenerator {
         g.draw(check);
 
         g.setColor(new Color(90, 110, 130));
-        g.setStroke(new BasicStroke(8, BasicStroke.CAP_ROUND));
+        g.setStroke(new BasicStroke(8, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
         g.drawLine(345, 405, 420, 405);
     }
 
