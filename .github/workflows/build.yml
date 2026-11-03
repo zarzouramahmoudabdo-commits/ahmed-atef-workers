@@ -52,6 +52,8 @@ jobs:
         run: |
           npx cap add android
           npx cap sync android
+          javac scripts/IconGenerator.java
+          java -Djava.awt.headless=true -cp scripts IconGenerator android/app/src/main/res
           sed -i "s/versionCode [0-9]*/versionCode ${GITHUB_RUN_NUMBER}/; s/versionName \".*\"/versionName \"${APP_VERSION}\"/" android/app/build.gradle
       - name: بناء APK موقّع (إن توفر مفتاح التوقيع) أو Debug
         env:
