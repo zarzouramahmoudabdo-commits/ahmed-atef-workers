@@ -110,12 +110,6 @@ public class IconGenerator {
         java.nio.file.Files.writeString(
             new File(adaptive, "ic_launcher_round.xml").toPath(), xml);
 
-        File colors = new File(res, "values");
-        colors.mkdirs();
-        java.nio.file.Files.writeString(
-            new File(colors, "worker_icon_colors.xml").toPath(),
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
-            "<resources><color name=\"ic_launcher_background\">#101F3D</color></resources>\n");
 
         System.out.println("تم إنشاء أيقونات Android بنجاح.");
     }
