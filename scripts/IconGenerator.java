@@ -101,7 +101,7 @@ public class IconGenerator {
         String xml =
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
             "<adaptive-icon xmlns:android=\"http://schemas.android.com/apk/res/android\">\n" +
-            "    <background android:drawable=\"@color/ic_launcher_background\" />\n" +
+            "    <background android:drawable=\"@color/worker_icon_background\" />\n" +
             "    <foreground android:drawable=\"@drawable/ic_launcher_foreground\" />\n" +
             "</adaptive-icon>\n";
 
