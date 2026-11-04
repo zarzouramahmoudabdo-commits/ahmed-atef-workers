@@ -30,6 +30,17 @@ test('كل الشاشات تُرسم بلا أخطاء (عميل Supabase وهم
   assert.match(w.document.getElementById('wlist').textContent, /محمد/);
   q.value = 'زززز'; q.dispatchEvent(new w.Event('input', { bubbles: true })); await wait();
   assert.match(w.document.getElementById('wlist').textContent, /لا يوجد عمال/); assert.equal(w.document.getElementById('wq'), q);
+  // بحث الحضور: يُخفي البطاقات دون إعادة بناء الحقل
+  await click('[data-act="home"]'); await click('[data-go="attendance"]');
+  const aq = w.document.getElementById('aq'); assert.ok(aq, 'حقل بحث الحضور غير موجود');
+  const card = () => w.document.querySelector('#alist [data-name]');
+  assert.notEqual(card().style.display, 'none');
+  aq.value = 'محمد'; aq.dispatchEvent(new w.Event('input', { bubbles: true })); await wait();
+  assert.equal(w.document.getElementById('aq'), aq, 'الحقل أُعيد بناؤه'); assert.notEqual(card().style.display, 'none');
+  aq.value = 'زززز'; aq.dispatchEvent(new w.Event('input', { bubbles: true })); await wait();
+  assert.equal(card().style.display, 'none'); assert.notEqual(w.document.getElementById('anone').style.display, 'none');
+  aq.value = ''; aq.dispatchEvent(new w.Event('input', { bubbles: true })); await wait();
+  assert.notEqual(card().style.display, 'none');
   // الحضور يفتح على اليوم، والتاريخ السابق مقفول حتى يُفتح صراحة، والقادم ممنوع
   await click('[data-act="home"]'); await click('[data-go="attendance"]');
   assert.match(text(), /✓ اليوم/); assert.ok(w.document.querySelector('[data-act="att"]'), 'أزرار اليوم غير ظاهرة');

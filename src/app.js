@@ -14,7 +14,7 @@ const $app = document.getElementById('app');
 const configured = !!(__SUPABASE_URL__ && __SUPABASE_ANON_KEY__);
 const sb = configured ? createClient(__SUPABASE_URL__, __SUPABASE_ANON_KEY__, { auth: { persistSession: true, autoRefreshToken: true } }) : null;
 const today = cairoToday();
-const S = { view: 'home', param: null, ym: ymOf(today), date: today, role: null, formId: crypto.randomUUID(), workers: [], q: '', showArchived: false, busy: false, unlocked: null, upd: null, bal: new Map() };
+const S = { view: 'home', param: null, ym: ymOf(today), date: today, role: null, formId: crypto.randomUUID(), workers: [], q: '', showArchived: false, busy: false, unlocked: null, aq: '', upd: null, bal: new Map() };
 const DAYS = ['س', 'ح', 'ن', 'ث', 'ر', 'خ', 'ج']; // السبت أولًا
 
 const ok = async (p) => { const { data, error } = await p; if (error) throw error; return data; };
@@ -33,7 +33,7 @@ async function run(fn, okMsg) {
 const safe = (fn, okMsg) => run(fn, okMsg).catch(() => {});
 
 function go(view, param = null) {
-  if (view === 'attendance') { S.date = today; S.ym = ymOf(today); S.unlocked = null; }
+  if (view === 'attendance') { S.date = today; S.ym = ymOf(today); S.unlocked = null; S.aq = ''; }
   S.view = view; S.param = param; S.formId = crypto.randomUUID(); render(); window.scrollTo(0, 0); }
 const shell = (title, body, back = true, extra = '') => `<header>${back ? '<button class="sec" data-act="home">←</button>' : ''}<h1>${esc(title)}</h1>${extra}</header><main>${body}</main>`;
 const dayName = (iso) => new Date(iso + 'T12:00:00Z').toLocaleDateString('ar-EG', { weekday: 'long', timeZone: 'UTC' });
@@ -130,14 +130,15 @@ V.attendance = async () => {
   const rows = activeWorkers().map((w) => {
     const a = day.find((x) => x.worker_id === w.id), p = a?.status === 'present';
     const tag = !a ? '<span class="tag t-u">غير مسجل</span>' : p ? '<span class="tag t-p">حاضر</span>' : '<span class="tag t-a">غائب</span>';
-    return `<div class="card"><div class="row"><b>${esc(w.full_name)}</b>${tag}</div>${a?.notes ? `<div class="muted">${esc(a.notes)}</div>` : ''}
+    const nm = norm(w.full_name), hide = nm.includes(norm(S.aq)) ? '' : ' style="display:none"';
+    return `<div class="card" data-name="${esc(nm)}"${hide}><div class="row"><b>${esc(w.full_name)}</b>${tag}</div>${a?.notes ? `<div class="muted">${esc(a.notes)}</div>` : ''}
 ${editable ? `<div class="row" style="margin-top:8px"><button class="${p ? 'on' : 'sec'}" data-act="att" data-w="${w.id}" data-s="present">حاضر</button>
 <button class="${a && !p ? 'red' : 'sec'}" data-act="att" data-w="${w.id}" data-s="absent">غائب</button>
 <button class="sec" data-act="att" data-w="${w.id}" data-s="unset">مسح</button></div>
 <div class="row" style="margin-top:6px"><button class="${a?.overtime ? 'on' : 'sec'}" data-act="ot" data-w="${w.id}" data-on="${a?.overtime ? 0 : 1}" ${p ? '' : 'disabled'}>${a?.overtime ? '✓ سهرة (إلغاء)' : 'سهرة'}</button>
 <button class="sec" data-act="note" data-w="${w.id}" ${a ? '' : 'disabled'}>ملاحظة</button></div>${p ? '' : '<div class="muted">السهرة تتطلب تسجيل الحضور أولًا.</div>'}` : ''}</div>`;
   }).join('');
-  return shell('الحضور اليومي', `${monthNav()}<div class="card cal">${cal}</div>${banner}${editable ? `<div class="row noprint" style="margin-bottom:10px"><button data-act="allpresent">الكل حاضر</button><button class="sec" data-act="copyprev">نسخ حضور اليوم السابق</button></div><p class="muted">«الكل حاضر» يسجّل غير المسجلين فقط، ولا يغيّر من سُجّل غائبًا. النسخ لا ينقل السهرات.</p>` : ''}${rows || '<p class="muted">لا يوجد عمال نشطون.</p>'}`);
+  return shell('الحضور اليومي', `${monthNav()}<div class="card cal">${cal}</div>${banner}${editable ? `<div class="row noprint" style="margin-bottom:10px"><button data-act="allpresent">الكل حاضر</button><button class="sec" data-act="copyprev">نسخ حضور اليوم السابق</button></div><p class="muted">«الكل حاضر» يسجّل غير المسجلين فقط، ولا يغيّر من سُجّل غائبًا. النسخ لا ينقل السهرات.</p>` : ''}<input id="aq" placeholder="بحث بالاسم" value="${esc(S.aq)}" autocomplete="off"><div id="alist">${rows || '<p class="muted">لا يوجد عمال نشطون.</p>'}</div><p id="anone" class="muted" style="display:none">لا توجد نتائج.</p>`);
 };
 
 const MONEY = {
@@ -346,7 +347,14 @@ $app.addEventListener('click', (e) => {
   const a = e.target.closest('[data-act]'), g = e.target.closest('[data-go]');
   if (a) { e.preventDefault(); A[a.dataset.act]?.(a); } else if (g) go(g.dataset.go, g.dataset.p ?? null);
 });
-$app.addEventListener('input', (e) => { if (e.target.id === 'wq') { S.q = e.target.value; const l = document.getElementById('wlist'); if (l) l.innerHTML = workersList(); } }); // تحديث القائمة فقط: الحقل لا يُعاد بناؤه فلا تُغلق لوحة المفاتيح
+$app.addEventListener('input', (e) => {
+  if (e.target.id === 'aq') {
+    S.aq = e.target.value; const q = norm(S.aq); let shown = 0;
+    document.querySelectorAll('#alist [data-name]').forEach((c) => { const ok = c.dataset.name.includes(q); c.style.display = ok ? '' : 'none'; if (ok) shown++; });
+    const none = document.getElementById('anone'); if (none) none.style.display = shown ? 'none' : '';
+  }
+  if (e.target.id === 'wq') { S.q = e.target.value; const l = document.getElementById('wlist'); if (l) l.innerHTML = workersList(); }
+}); // تحديث القائمة فقط: الحقل لا يُعاد بناؤه فلا تُغلق لوحة المفاتيح
 $app.addEventListener('change', (e) => {
   if (e.target.id === 'warch' || e.target.id === 'rarch') { S.showArchived = e.target.checked; render(); }
 });
