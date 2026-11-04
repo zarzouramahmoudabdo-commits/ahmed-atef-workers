@@ -34,6 +34,7 @@ const safe = (fn, okMsg) => run(fn, okMsg).catch(() => {});
 
 function go(view, param = null) {
   if (view === 'attendance') { S.date = today; S.ym = ymOf(today); S.unlocked = null; S.aq = ''; }
+  if (view === 'workers') S.q = '';   // البحث يبدأ فارغًا كل مرة
   S.view = view; S.param = param; S.formId = crypto.randomUUID(); render(); window.scrollTo(0, 0); }
 const shell = (title, body, back = true, extra = '') => `<header>${back ? '<button class="sec" data-act="home">←</button>' : ''}<h1>${esc(title)}</h1>${extra}</header><main>${body}</main>`;
 const dayName = (iso) => new Date(iso + 'T12:00:00Z').toLocaleDateString('ar-EG', { weekday: 'long', timeZone: 'UTC' });
@@ -112,7 +113,9 @@ V.workerForm = async () => {
 <p class="muted">تغيير الأسعار يسري على السجلات الجديدة فقط.</p>
 <label>ملاحظات</label><textarea id="f_notes">${esc(w.notes)}</textarea>
 <button data-act="saveWorker" style="width:100%">حفظ</button></div>
-${w.id ? `<button class="${w.status === 'active' ? 'red' : ''}" data-act="toggleArchive" style="width:100%">${w.status === 'active' ? 'أرشفة العامل' : 'استعادة العامل'}</button>` : ''}`);
+${w.id ? `<button class="${w.status === 'active' ? 'red' : ''}" data-act="toggleArchive" style="width:100%">${w.status === 'active' ? 'أرشفة العامل' : 'استعادة العامل'}</button>
+<p class="muted">الأرشفة تُخفي العامل وتحتفظ بكل حساباته. الحذف النهائي يمسحه مع كل سجلاته.</p>
+<button class="sec" data-act="deleteWorker" style="width:100%;color:var(--red);border:1px solid var(--red)">🗑 حذف العامل نهائيًا</button>` : ''}`);
 };
 
 V.attendance = async () => {
@@ -257,6 +260,17 @@ const A = {
   }, 'تم الحفظ'),
   toggleArchive: () => { const w = S.workers.find((x) => x.id === S.param); if (!confirm(w.status === 'active' ? 'أرشفة العامل؟ تبقى كل حساباته محفوظة.' : 'استعادة العامل؟')) return;
     safe(async () => { await ok(sb.from('workers').update({ status: w.status === 'active' ? 'archived' : 'active' }).eq('id', w.id)); go('workers'); }, 'تم'); },
+  deleteWorker: async () => {
+    const w = S.workers.find((x) => x.id === S.param); if (!w) return;
+    let pv; try { pv = await run(() => ok(sb.rpc('worker_delete_preview', { p_worker: w.id }))); } catch { return; }
+    const total = pv.attendance + pv.advances + pv.deductions + pv.payments; let typed = '';
+    if (total === 0) { if (!confirm(`حذف العامل «${w.full_name}» نهائيًا؟ لا توجد له أي سجلات.`)) return; }
+    else {
+      if (!confirm(`⚠ حذف نهائي للعامل «${w.full_name}» وكل حساباته:\n• ${pv.attendance} يوم حضور/غياب\n• ${pv.advances} سلفة\n• ${pv.deductions} خصم\n• ${pv.payments} دفعة (المدفوع ${fmt(num(pv.paid_total))})\n\nالأفضل «أرشفة العامل» للاحتفاظ بالحسابات. هل تريد الحذف النهائي؟`)) return;
+      typed = prompt(`للتأكيد اكتب اسم العامل كما هو:\n${w.full_name}`); if (typed === null) return;
+    }
+    safe(async () => { await ok(sb.rpc('delete_worker', { p_worker: w.id, p_name: typed })); go('workers'); }, 'تم حذف العامل');
+  },
   att: (el) => safe(async () => {
     const args = { p_worker: el.dataset.w, p_date: S.date, p_status: el.dataset.s, p_notes: null, p_cancel_overtime: false };
     try { await ok(sb.rpc('set_attendance', args)); }

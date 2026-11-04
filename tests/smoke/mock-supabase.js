@@ -12,6 +12,6 @@ function q(table) {
 }
 export const createClient = () => ({
   from: q,
-  rpc: (n) => Promise.resolve({ data: n === 'month_report' ? REP : null, error: null }),
+  rpc: (n) => Promise.resolve({ data: n === 'month_report' ? REP : n === 'worker_delete_preview' ? { attendance: 2, advances: 1, deductions: 0, payments: 1, paid_total: 40 } : null, error: null }),
   auth: { getSession: async () => ({ data: { session: { user: { id: 'u', email: 'a@b.c' } } } }), signOut: async () => ({}), signInWithPassword: async () => ({ data: {}, error: null }), resetPasswordForEmail: async () => ({ data: {}, error: null }) },
 });

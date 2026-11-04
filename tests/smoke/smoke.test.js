@@ -53,8 +53,16 @@ test('كل الشاشات تُرسم بلا أخطاء (عميل Supabase وهم
   await click('[data-act="today"]'); await click('[data-act="mnext"]');
   w.document.querySelector('[data-act="pick"]').click(); await wait();
   assert.match(text(), /تاريخ قادم/); assert.equal(w.document.querySelector('[data-act="att"]'), null, 'التاريخ القادم يجب أن يكون ممنوعًا');
+  // حذف العامل: زر موجود، ويطلب تأكيدًا ثم يعود لقائمة العمال دون أخطاء
+  await click('[data-act="home"]'); await click('[data-go="workers"]'); await click('[data-go="workerDetail"]'); await click('[data-go="workerForm"]');
+  assert.ok(w.document.querySelector('[data-act="deleteWorker"]'), 'زر الحذف غير موجود');
+  const asked = []; w.confirm = (m) => { asked.push(m); return true; }; w.prompt = () => 'محمد';
+  await click('[data-act="deleteWorker"]'); await wait();
+  assert.ok(asked.some((m) => m.includes('2 يوم حضور') && m.includes('1 سلفة') && m.includes('1 دفعة')), 'رسالة التأكيد لا تعرض ما سيُحذف');
+  assert.match(text(), /إضافة عامل/, 'لم يعد لقائمة العمال');
+  w.confirm = () => true; w.prompt = () => 'x';
   // الرئيسية بلا اختيار تاريخ
-  await click('[data-act="today"]'); await click('[data-act="home"]');
+  await click('[data-act="home"]');
   assert.equal(w.document.getElementById('dsel'), null); assert.ok(w.document.querySelector('[data-act="refresh"]'), 'زر 🔄 غير موجود');
   assert.deepEqual(errors, []);
 });

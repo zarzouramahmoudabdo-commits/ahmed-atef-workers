@@ -9,3 +9,4 @@ for f in supabase/migrations/*.sql; do $PSQL -f "$f"; done
 $PSQL -f tests/sql/10_tests.sql
 $PSQL -f tests/sql/20_bulk.sql
 $PSQL -f tests/sql/30_dates.sql
+$PSQL -f tests/sql/40_delete.sql

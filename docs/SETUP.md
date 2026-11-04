@@ -4,7 +4,7 @@
 1. أنشئ مشروعًا جديدًا في supabase.com.
 2. **Authentication → Providers → Email**: عطّل «Allow new users to sign up» (لا إنشاء حسابات ذاتي).
 3. **Authentication → Users → Add user**: أنشئ حساب المدير (بريد + كلمة مرور). انسخ الـ UUID الخاص به.
-4. **SQL Editor**: شغّل الملفات بالترتيب: `supabase/migrations/001_schema.sql` ثم `002_rls.sql` ثم `003_functions.sql` ثم `004_bulk.sql` ثم `005_no_future_dates.sql`.
+4. **SQL Editor**: شغّل الملفات بالترتيب: `supabase/migrations/001_schema.sql` ثم `002_rls.sql` ثم `003_functions.sql` ثم `004_bulk.sql` ثم `005_no_future_dates.sql` ثم `006_delete_worker.sql`.
 5. اجعله مديرًا (استبدل الـ UUID):
    ```sql
    insert into public.profiles(id, full_name, role) values ('UUID-هنا', 'المدير', 'admin');
