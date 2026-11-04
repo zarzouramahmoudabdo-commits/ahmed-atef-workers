@@ -1,6 +1,6 @@
 {
   "name": "ahmed-atef-workers",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -16,6 +16,7 @@
     "@supabase/supabase-js": "^2.45.0"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^7.0.0",
     "esbuild": "^0.24.0",
     "jsdom": "^25.0.0"

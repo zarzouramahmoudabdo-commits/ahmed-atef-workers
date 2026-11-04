@@ -9,7 +9,7 @@ export function toast(msg, err = false) {
 export function errMsg(e) {
   const m = String(e?.message || e || '');
   if (/Failed to fetch|NetworkError|Load failed|network/i.test(m)) return 'تعذر الاتصال بالإنترنت. لم يتم الحفظ، حاول مرة أخرى.';
-  const known = m.match(/(NOT_ADMIN|NOT_STAFF|BAD_STATUS|NO_WORKER|ARCHIVED|OVERTIME_EXISTS|OVERTIME_REQUIRES_PRESENT|NO_RECORD|REASON_REQUIRED|BAD_BACKUP|BAD_TABLE): ?(.*)/);
+  const known = m.match(/(NOT_ADMIN|NOT_STAFF|BAD_STATUS|NO_WORKER|ARCHIVED|OVERTIME_EXISTS|OVERTIME_REQUIRES_PRESENT|NO_RECORD|BAD_DATE|REASON_REQUIRED|BAD_BACKUP|BAD_TABLE): ?(.*)/);
   if (known) return known[2];
   if (/row-level security|permission denied/i.test(m)) return 'غير مصرح لك بهذه العملية.';
   if (/deductions_reason_check/.test(m)) return 'سبب الخصم مطلوب.';

@@ -66,7 +66,8 @@ V.home = async () => {
   const t = (k) => sum(rows, k);
   const st = (l, v) => `<div class="card stat"><span>${l}</span><b>${v}</b></div>`;
   return shell('لوحة التحكم', `${monthNav()}
-<label>التاريخ المختار</label><input type="date" id="dsel" value="${S.date}">
+<label>التاريخ المختار</label><div class="row"><input type="date" id="dsel" value="${S.date}"><button class="sec" data-act="today">اليوم</button></div>
+${act.size - pres - abs > 0 && isAdmin() ? `<div class="warn" data-go="attendance" style="cursor:pointer">⚠ ${act.size - pres - abs} عامل غير مسجل في ${S.date} — اضغط لتسجيل الحضور</div>` : ''}
 <div class="grid">${st('العمال النشطون', act.size)}${st('الحاضرون', pres)}${st('الغائبون المسجلون', abs)}${st('غير مسجلين', act.size - pres - abs)}
 ${st('عدد السهرات (الشهر)', rows.reduce((s, r) => s + r.overtime_count, 0))}${st('إجمالي اليوميات', fmt(t('daily_total')))}
 ${st('إجمالي السهرات', fmt(t('overtime_total')))}${st('إجمالي الأجور', fmt(t('earned')))}${st('إجمالي السلف', fmt(t('advances_total')))}
@@ -77,13 +78,15 @@ ${st('إجمالي الخصومات', fmt(t('deductions_total')))}${st('صافي
 };
 
 V.workers = async () => {
-  await loadWorkers();
+  const [, rep] = await Promise.all([loadWorkers(), ok(sb.rpc('month_report', { p_year: S.ym.y, p_month: S.ym.m, p_include_archived: true }))]);
+  const bal = new Map(rep.map((r) => [r.worker_id, r]));
   const list = S.workers.filter((w) => (S.showArchived ? true : w.status === 'active') && w.full_name.includes(S.q));
   return shell('العمال', `${isAdmin() ? '<button data-go="workerForm" style="width:100%;margin-bottom:10px">+ إضافة عامل</button>' : ''}
 <input id="wq" placeholder="بحث بالاسم" value="${esc(S.q)}">
 <label><input type="checkbox" id="warch" ${S.showArchived ? 'checked' : ''} style="width:auto"> إظهار المؤرشفين</label>
 ${list.map((w) => `<div class="card" data-go="workerDetail" data-p="${w.id}"><b>${esc(w.full_name)}</b> ${w.status === 'archived' ? '<span class="tag t-u">مؤرشف</span>' : ''}
-<div class="muted">رقم ${w.worker_no} • يومية ${fmt(num(w.daily_rate))} • سهرة ${fmt(num(w.overtime_rate))}</div></div>`).join('') || '<p class="muted">لا يوجد عمال.</p>'}`);
+<div class="muted">رقم ${w.worker_no} • يومية ${fmt(num(w.daily_rate))} • سهرة ${fmt(num(w.overtime_rate))}</div>
+${bal.get(w.id) ? `<div>المتبقي لـ${MONTHS_AR[S.ym.m - 1]}: <b>${money(bal.get(w.id).remaining)}</b>${num(bal.get(w.id).previous_balance) ? ` <span class="muted">(+ رصيد سابق ${fmt(num(bal.get(w.id).previous_balance))})</span>` : ''}</div>` : ''}</div>`).join('') || '<p class="muted">لا يوجد عمال.</p>'}`);
 };
 
 V.workerForm = async () => {
@@ -98,7 +101,7 @@ V.workerForm = async () => {
 <p class="muted">تغيير الأسعار يسري على السجلات الجديدة فقط.</p>
 <label>ملاحظات</label><textarea id="f_notes">${esc(w.notes)}</textarea>
 <button data-act="saveWorker" style="width:100%">حفظ</button></div>
-${w.id ? `<button class="${w.status === 'active' ? 'red' : ''}" data-act="toggleArchive" style="width:100%">${w.status === 'active' ? 'أرشفة العامل' : 'استعادة العامل'}</button><button class="red" data-act="deleteWorker" style="width:100%;margin-top:10px">حذف العامل نهائياً</button>` : ''}`);
+${w.id ? `<button class="${w.status === 'active' ? 'red' : ''}" data-act="toggleArchive" style="width:100%">${w.status === 'active' ? 'أرشفة العامل' : 'استعادة العامل'}</button>` : ''}`);
 };
 
 V.attendance = async () => {
@@ -118,7 +121,7 @@ ${isAdmin() ? `<div class="row" style="margin-top:8px"><button class="${p ? 'on'
 <div class="row" style="margin-top:6px"><button class="${a?.overtime ? 'on' : 'sec'}" data-act="ot" data-w="${w.id}" data-on="${a?.overtime ? 0 : 1}" ${p ? '' : 'disabled'}>${a?.overtime ? '✓ سهرة (إلغاء)' : 'سهرة'}</button>
 <button class="sec" data-act="note" data-w="${w.id}" ${a ? '' : 'disabled'}>ملاحظة</button></div>${p ? '' : '<div class="muted">السهرة تتطلب تسجيل الحضور أولًا.</div>'}` : ''}</div>`;
   }).join('');
-  return shell('الحضور اليومي', `${monthNav()}<div class="card cal">${cal}</div><h3>${S.date}</h3>${rows || '<p class="muted">لا يوجد عمال نشطون.</p>'}`);
+  return shell('الحضور اليومي', `${monthNav()}<div class="card cal">${cal}</div><h3>${S.date}</h3>${isAdmin() ? `<div class="row noprint" style="margin-bottom:10px"><button data-act="allpresent">الكل حاضر</button><button class="sec" data-act="copyprev">نسخ حضور اليوم السابق</button></div><p class="muted">«الكل حاضر» يسجّل غير المسجلين فقط، ولا يغيّر من سُجّل غائبًا. النسخ لا ينقل السهرات.</p>` : ''}${rows || '<p class="muted">لا يوجد عمال نشطون.</p>'}`);
 };
 
 const MONEY = {
@@ -213,6 +216,12 @@ const A = {
   home: () => go('home'),
   mprev: () => { S.ym = shiftMonth(S.ym.y, S.ym.m, -1); S.date = isoDate(S.ym.y, S.ym.m, 1); render(); },
   mnext: () => { S.ym = shiftMonth(S.ym.y, S.ym.m, 1); S.date = isoDate(S.ym.y, S.ym.m, 1); render(); },
+  today: () => { S.date = today; S.ym = ymOf(today); render(); },
+  allpresent: () => { if (!confirm(`تسجيل كل العمال النشطين غير المسجلين «حاضر» ليوم ${S.date}؟`)) return;
+    safe(async () => { const n = await ok(sb.rpc('mark_all_present', { p_date: S.date })); toast(n ? `تم تسجيل ${n} عامل حاضر` : 'لا يوجد عمال غير مسجلين'); render(); }); },
+  copyprev: () => { const d = new Date(S.date + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - 1); const prev = d.toISOString().slice(0, 10);
+    if (!confirm(`نسخ حضور وغياب ${prev} إلى ${S.date} للعمال غير المسجلين؟ (بدون السهرات)`)) return;
+    safe(async () => { const n = await ok(sb.rpc('copy_attendance_from', { p_from: prev, p_to: S.date })); toast(n ? `تم نسخ ${n} سجل` : 'لا يوجد ما يُنسخ'); render(); }); },
   pick: (el) => { S.date = el.dataset.d; render(); },
   login: () => safe(async () => { await ok(sb.auth.signInWithPassword({ email: val('em'), password: document.getElementById('pw').value })); await boot(); }),
   reset: async () => { const e = prompt('اكتب بريدك الإلكتروني'); if (e) safe(async () => { await ok(sb.auth.resetPasswordForEmail(e)); }, 'إذا كان البريد مسجلًا ستصلك رسالة'); },
@@ -227,17 +236,6 @@ const A = {
   }, 'تم الحفظ'),
   toggleArchive: () => { const w = S.workers.find((x) => x.id === S.param); if (!confirm(w.status === 'active' ? 'أرشفة العامل؟ تبقى كل حساباته محفوظة.' : 'استعادة العامل؟')) return;
     safe(async () => { await ok(sb.from('workers').update({ status: w.status === 'active' ? 'archived' : 'active' }).eq('id', w.id)); go('workers'); }, 'تم'); },
-  deleteWorker: () => {
-    const w = S.workers.find((x) => x.id === S.param);
-    if (!w) return;
-    if (!confirm(`تحذير: سيتم حذف العامل "${w.full_name}" نهائياً، مع كل سجلات الحضور والسهرات والسلف والخصومات والمدفوعات. لا يمكن التراجع عن الحذف. هل أنت متأكد؟`)) return;
-    if (!confirm('تأكيد أخير: هل تريد مسح جميع بيانات هذا العامل نهائياً؟')) return;
-    safe(async () => {
-      await ok(sb.rpc('delete_worker', { p_worker: w.id }));
-      S.param = null;
-      go('workers');
-    }, 'تم حذف العامل وجميع سجلاته نهائياً');
-  },
   att: (el) => safe(async () => {
     const args = { p_worker: el.dataset.w, p_date: S.date, p_status: el.dataset.s, p_notes: null, p_cancel_overtime: false };
     try { await ok(sb.rpc('set_attendance', args)); }
