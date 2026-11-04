@@ -2,6 +2,7 @@
   "name": "ahmed-atef-workers",
   "version": "1.0.1",
   "private": true,
+  "minApk": "1.0.1",
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -11,6 +12,8 @@
   },
   "dependencies": {
     "@capacitor/android": "^7.0.0",
+    "@capacitor/app": "^7.0.0",
+    "@capacitor-community/file-opener": "^7.0.1",
     "@capacitor/core": "^7.0.0",
     "@capacitor/filesystem": "^7.0.0",
     "@supabase/supabase-js": "^2.45.0"

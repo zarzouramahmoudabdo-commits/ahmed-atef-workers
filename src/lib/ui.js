@@ -9,7 +9,7 @@ export function toast(msg, err = false) {
 export function errMsg(e) {
   const m = String(e?.message || e || '');
   if (/Failed to fetch|NetworkError|Load failed|network/i.test(m)) return 'تعذر الاتصال بالإنترنت. لم يتم الحفظ، حاول مرة أخرى.';
-  const known = m.match(/(NOT_ADMIN|NOT_STAFF|BAD_STATUS|NO_WORKER|ARCHIVED|OVERTIME_EXISTS|OVERTIME_REQUIRES_PRESENT|NO_RECORD|BAD_DATE|REASON_REQUIRED|BAD_BACKUP|BAD_TABLE): ?(.*)/);
+  const known = m.match(/(NOT_ADMIN|NOT_STAFF|BAD_STATUS|NO_WORKER|ARCHIVED|OVERTIME_EXISTS|OVERTIME_REQUIRES_PRESENT|NO_RECORD|BAD_DATE|FUTURE_DATE|REASON_REQUIRED|BAD_BACKUP|BAD_TABLE): ?(.*)/);
   if (known) return known[2];
   if (/row-level security|permission denied/i.test(m)) return 'غير مصرح لك بهذه العملية.';
   if (/deductions_reason_check/.test(m)) return 'سبب الخصم مطلوب.';
@@ -42,7 +42,7 @@ export async function sha256Hex(bytes) {
 }
 export const b64ToBytes = unb64;
 export function cmpVersion(a, b) {
-  const x = String(a).replace(/^v/, '').split('.').map(Number), y = String(b).replace(/^v/, '').split('.').map(Number);
+  const x = String(a).replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0), y = String(b).replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0);
   for (let i = 0; i < 3; i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d > 0 ? 1 : -1; }
   return 0;
 }

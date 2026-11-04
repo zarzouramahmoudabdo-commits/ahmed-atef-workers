@@ -51,6 +51,7 @@ jobs:
       - name: إنشاء مشروع Android ومزامنته
         run: |
           npx cap add android
+          sed -i 's#</manifest>#    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n</manifest>#' android/app/src/main/AndroidManifest.xml
           npx @capacitor/assets generate --android --iconBackgroundColor '#14532d' --splashBackgroundColor '#14532d'
           npx cap sync android
           sed -i "s/versionCode [0-9]*/versionCode ${GITHUB_RUN_NUMBER}/; s/versionName \".*\"/versionName \"${APP_VERSION}\"/" android/app/build.gradle
@@ -88,12 +89,27 @@ jobs:
             require("fs").writeFileSync("update.json", JSON.stringify({version:v,versionCode:+code,apkUrl:`https://github.com/${repo}/releases/download/${tag}/AhmedAtefWorkers-${v}.apk`,sha256:sha,notes},null,2));
           ' "$APP_VERSION" "$TAG" "$SHA" "$NOTES" "$GITHUB_REPOSITORY" "$GITHUB_RUN_NUMBER"
           cat update.json
+      - name: حزمة التحديث الموقّعة (OTA)
+        env:
+          OTA_PRIVATE_KEY: ${{ secrets.OTA_PRIVATE_KEY }}
+        run: |
+          if [ -z "$OTA_PRIVATE_KEY" ]; then
+            echo "::warning::لا يوجد OTA_PRIVATE_KEY، لن تُنشأ حزمة التحديث من داخل التطبيق."
+            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "::error::الإصدارات الرسمية تتطلب OTA_PRIVATE_KEY"; exit 1; fi
+            exit 0
+          fi
+          export APK_NAME="AhmedAtefWorkers-${APP_VERSION}.apk"
+          export APK_SHA=$(sha256sum "$APK_NAME" | cut -d' ' -f1)
+          export NOTES="${{ github.event.head_commit.message }}"
+          node scripts/make-ota.mjs
+          cp ota-out/* .
       - uses: actions/upload-artifact@v4
         with:
           name: AhmedAtefWorkers-apk
           path: |
             AhmedAtefWorkers-*.apk
             update.json
+            ota-*
       - name: نشر الإصدار
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
@@ -101,3 +117,8 @@ jobs:
           files: |
             AhmedAtefWorkers-*.apk
             update.json
+            ota-bundle.json
+            ota-bundle.sig
+            ota-index.html
+            ota-app.js
+            ota-style.css

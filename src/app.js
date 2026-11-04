@@ -4,14 +4,17 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { MONTHS_AR, daysInMonth, monthRange, shiftMonth, firstWeekday, cairoToday, ymOf, isoDate } from './lib/months.js';
 import { summarize, toCents, fmt } from './lib/finance.js';
 import { normalizePhone, buildStatementMessage, waLink } from './lib/whatsapp.js';
-import { esc, toast, errMsg, errCode, encryptText, decryptText, sha256Hex, b64ToBytes, cmpVersion } from './lib/ui.js';
+import { esc, toast, errMsg, errCode, encryptText, decryptText, sha256Hex, cmpVersion } from './lib/ui.js';
+import { App } from '@capacitor/app';
+import { FileOpener } from '@capacitor-community/file-opener';
+import { checkOta, applyOta, otaBoot, resetOta, fetchBytes } from './lib/ota.js';
 
-const VERSION = __APP_VERSION__, REPO = __REPO__;
+const VERSION = __APP_VERSION__, REPO = __REPO__, PUBKEY = __OTA_PUBKEY__;
 const $app = document.getElementById('app');
 const configured = !!(__SUPABASE_URL__ && __SUPABASE_ANON_KEY__);
 const sb = configured ? createClient(__SUPABASE_URL__, __SUPABASE_ANON_KEY__, { auth: { persistSession: true, autoRefreshToken: true } }) : null;
 const today = cairoToday();
-const S = { view: 'home', param: null, ym: ymOf(today), date: today, role: null, formId: crypto.randomUUID(), workers: [], q: '', showArchived: false, busy: false };
+const S = { view: 'home', param: null, ym: ymOf(today), date: today, role: null, formId: crypto.randomUUID(), workers: [], q: '', showArchived: false, busy: false, unlocked: null, upd: null, bal: new Map() };
 const DAYS = ['س', 'ح', 'ن', 'ث', 'ر', 'خ', 'ج']; // السبت أولًا
 
 const ok = async (p) => { const { data, error } = await p; if (error) throw error; return data; };
@@ -29,9 +32,13 @@ async function run(fn, okMsg) {
 }
 const safe = (fn, okMsg) => run(fn, okMsg).catch(() => {});
 
-function go(view, param = null) { S.view = view; S.param = param; S.formId = crypto.randomUUID(); render(); window.scrollTo(0, 0); }
-const shell = (title, body, back = true) => `<header>${back ? '<button class="sec" data-act="home">←</button>' : ''}<h1>${esc(title)}</h1></header><main>${body}</main>`;
-const monthNav = () => `<div class="row noprint"><button class="sec" data-act="mprev">‹ السابق</button><b style="text-align:center">${MONTHS_AR[S.ym.m - 1]} ${S.ym.y}</b><button class="sec" data-act="mnext">التالي ›</button></div>`;
+function go(view, param = null) {
+  if (view === 'attendance') { S.date = today; S.ym = ymOf(today); S.unlocked = null; }
+  S.view = view; S.param = param; S.formId = crypto.randomUUID(); render(); window.scrollTo(0, 0); }
+const shell = (title, body, back = true, extra = '') => `<header>${back ? '<button class="sec" data-act="home">←</button>' : ''}<h1>${esc(title)}</h1>${extra}</header><main>${body}</main>`;
+const dayName = (iso) => new Date(iso + 'T12:00:00Z').toLocaleDateString('ar-EG', { weekday: 'long', timeZone: 'UTC' });
+const norm = (t) => String(t || '').replace(/[\u064B-\u0652\u0640]/g, '').replace(/[أإآ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه').toLowerCase().trim();
+const monthNav = (note = false) => `<div class="row noprint"><button class="sec" data-act="mprev">‹ الشهر السابق</button><b style="text-align:center">${MONTHS_AR[S.ym.m - 1]} ${S.ym.y}</b><button class="sec" data-act="mnext">الشهر التالي ›</button></div>${note ? '<p class="muted" style="margin:4px 0 10px">تغيير الشهر لعرض الحسابات فقط، ولا يغيّر تاريخ تسجيل الحضور.</p>' : ''}`;
 async function loadWorkers() { S.workers = await ok(sb.from('workers').select('*').order('full_name')); return S.workers; }
 const activeWorkers = () => S.workers.filter((w) => w.status === 'active');
 const workerOpts = (sel) => activeWorkers().map((w) => `<option value="${w.id}" ${w.id === sel ? 'selected' : ''}>${esc(w.full_name)}</option>`).join('');
@@ -60,33 +67,37 @@ V.home = async () => {
   const { y, m } = S.ym;
   const [rows, ws, att, tdAtt] = await Promise.all([
     ok(sb.rpc('month_report', { p_year: y, p_month: m, p_include_archived: false })), loadWorkers(),
-    ok(sb.from('attendance').select('worker_id,status,overtime').eq('work_date', S.date)), Promise.resolve()]);
+    ok(sb.from('attendance').select('worker_id,status,overtime').eq('work_date', today)), Promise.resolve()]);
   const act = new Set(activeWorkers().map((w) => w.id)), a = att.filter((x) => act.has(x.worker_id));
   const pres = a.filter((x) => x.status === 'present').length, abs = a.filter((x) => x.status === 'absent').length;
   const t = (k) => sum(rows, k);
   const st = (l, v) => `<div class="card stat"><span>${l}</span><b>${v}</b></div>`;
-  return shell('لوحة التحكم', `${monthNav()}
-<label>التاريخ المختار</label><div class="row"><input type="date" id="dsel" value="${S.date}"><button class="sec" data-act="today">اليوم</button></div>
-${act.size - pres - abs > 0 && isAdmin() ? `<div class="warn" data-go="attendance" style="cursor:pointer">⚠ ${act.size - pres - abs} عامل غير مسجل في ${S.date} — اضغط لتسجيل الحضور</div>` : ''}
-<div class="grid">${st('العمال النشطون', act.size)}${st('الحاضرون', pres)}${st('الغائبون المسجلون', abs)}${st('غير مسجلين', act.size - pres - abs)}
+  return shell('لوحة التحكم', `${S.upd ? `<div class="warn" data-act="refresh" style="cursor:pointer">🔄 يوجد تحديث جديد (${esc(S.upd.manifest.version)}) — اضغط للتثبيت من داخل التطبيق</div>` : ''}
+<div class="card ok">اليوم: ${dayName(today)} ${today}</div>
+${act.size - pres - abs > 0 && isAdmin() ? `<div class="warn" data-go="attendance" style="cursor:pointer">⚠ ${act.size - pres - abs} عامل غير مسجل اليوم — اضغط لتسجيل الحضور</div>` : ''}
+<h3 style="margin:8px 0">حسابات شهر</h3>${monthNav(true)}
+<div class="grid">${st('العمال النشطون', act.size)}${st('الحاضرون اليوم', pres)}${st('الغائبون المسجلون اليوم', abs)}${st('غير مسجلين اليوم', act.size - pres - abs)}
 ${st('عدد السهرات (الشهر)', rows.reduce((s, r) => s + r.overtime_count, 0))}${st('إجمالي اليوميات', fmt(t('daily_total')))}
 ${st('إجمالي السهرات', fmt(t('overtime_total')))}${st('إجمالي الأجور', fmt(t('earned')))}${st('إجمالي السلف', fmt(t('advances_total')))}
 ${st('إجمالي الخصومات', fmt(t('deductions_total')))}${st('صافي المستحقات قبل الدفع', fmt(t('net_due')))}${st('إجمالي المدفوعات', fmt(t('paid_total')))}</div>
 <div class="card stat"><span>إجمالي الأرصدة المتبقية للدفع</span><b>${money(rows.reduce((s, r) => s + num(r.remaining), 0) / 100)}</b></div>
 <div class="menu"><button data-go="workers">العمال</button><button data-go="attendance">الحضور اليومي</button><button data-go="advances">السلف</button><button data-go="deductions">الخصومات</button>
-<button data-go="payments">المدفوعات</button><button data-go="report">التقارير الشهرية</button><button data-go="backup">النسخ الاحتياطي</button><button data-go="settings">الإعدادات والتحديثات</button></div>`, false);
+<button data-go="payments">المدفوعات</button><button data-go="report">التقارير الشهرية</button><button data-go="backup">النسخ الاحتياطي</button><button data-go="settings">الإعدادات والتحديثات</button></div>`, false, `<button class="sec" data-act="refresh" title="تحديث">🔄${S.upd ? '<span class="dot"></span>' : ''}</button>`);
 };
 
+const workersList = () => {
+  const q = norm(S.q), list = S.workers.filter((w) => (S.showArchived ? true : w.status === 'active') && norm(w.full_name).includes(q));
+  return list.map((w) => `<div class="card" data-go="workerDetail" data-p="${w.id}"><b>${esc(w.full_name)}</b> ${w.status === 'archived' ? '<span class="tag t-u">مؤرشف</span>' : ''}
+<div class="muted">رقم ${w.worker_no} • يومية ${fmt(num(w.daily_rate))} • سهرة ${fmt(num(w.overtime_rate))}</div>
+${S.bal.get(w.id) ? `<div>المتبقي لـ${MONTHS_AR[S.ym.m - 1]}: <b>${money(S.bal.get(w.id).remaining)}</b>${num(S.bal.get(w.id).previous_balance) ? ` <span class="muted">(+ رصيد سابق ${fmt(num(S.bal.get(w.id).previous_balance))})</span>` : ''}</div>` : ''}</div>`).join('') || '<p class="muted">لا يوجد عمال.</p>';
+};
 V.workers = async () => {
   const [, rep] = await Promise.all([loadWorkers(), ok(sb.rpc('month_report', { p_year: S.ym.y, p_month: S.ym.m, p_include_archived: true }))]);
-  const bal = new Map(rep.map((r) => [r.worker_id, r]));
-  const list = S.workers.filter((w) => (S.showArchived ? true : w.status === 'active') && w.full_name.includes(S.q));
+  S.bal = new Map(rep.map((r) => [r.worker_id, r]));
   return shell('العمال', `${isAdmin() ? '<button data-go="workerForm" style="width:100%;margin-bottom:10px">+ إضافة عامل</button>' : ''}
-<input id="wq" placeholder="بحث بالاسم" value="${esc(S.q)}">
+<input id="wq" placeholder="بحث بالاسم" value="${esc(S.q)}" autocomplete="off">
 <label><input type="checkbox" id="warch" ${S.showArchived ? 'checked' : ''} style="width:auto"> إظهار المؤرشفين</label>
-${list.map((w) => `<div class="card" data-go="workerDetail" data-p="${w.id}"><b>${esc(w.full_name)}</b> ${w.status === 'archived' ? '<span class="tag t-u">مؤرشف</span>' : ''}
-<div class="muted">رقم ${w.worker_no} • يومية ${fmt(num(w.daily_rate))} • سهرة ${fmt(num(w.overtime_rate))}</div>
-${bal.get(w.id) ? `<div>المتبقي لـ${MONTHS_AR[S.ym.m - 1]}: <b>${money(bal.get(w.id).remaining)}</b>${num(bal.get(w.id).previous_balance) ? ` <span class="muted">(+ رصيد سابق ${fmt(num(bal.get(w.id).previous_balance))})</span>` : ''}</div>` : ''}</div>`).join('') || '<p class="muted">لا يوجد عمال.</p>'}`);
+<div id="wlist">${workersList()}</div>`);
 };
 
 V.workerForm = async () => {
@@ -109,19 +120,24 @@ V.attendance = async () => {
   const [att] = await Promise.all([ok(sb.from('attendance').select('*').gte('work_date', start).lt('work_date', end)), loadWorkers()]);
   const has = new Set(att.map((a) => a.work_date)), n = daysInMonth(y, m), off = (firstWeekday(y, m) + 1) % 7;
   let cal = DAYS.map((d) => `<div class="h">${d}</div>`).join('') + '<div></div>'.repeat(off);
-  for (let d = 1; d <= n; d++) { const iso = isoDate(y, m, d); cal += `<button data-act="pick" data-d="${iso}" class="${iso === S.date ? 'sel' : ''} ${has.has(iso) ? 'has' : ''}">${d}</button>`; }
+  for (let d = 1; d <= n; d++) { const iso = isoDate(y, m, d); cal += `<button data-act="pick" data-d="${iso}" class="${iso === S.date ? 'sel' : ''} ${has.has(iso) ? 'has' : ''} ${iso === today ? 'tdy' : ''} ${iso > today ? 'fut' : ''}">${d}</button>`; }
+  const isToday = S.date === today, future = S.date > today;
+  const editable = isAdmin() && !future && (isToday || S.unlocked === S.date);
+  const banner = isToday ? `<div class="ok">✓ اليوم — ${dayName(S.date)} ${S.date}</div>`
+    : future ? `<div class="warn">⛔ تاريخ قادم (${dayName(S.date)} ${S.date}): لا يمكن تسجيل حضور قبل حدوثه.</div><button data-act="today" style="width:100%;margin-bottom:10px">العودة لليوم</button>`
+    : `<div class="warn">⚠ أنت تعرض تاريخًا سابقًا: <b>${dayName(S.date)} ${S.date}</b></div>${editable ? '<p class="muted">التعديل مفتوح لهذا التاريخ فقط. راجع التاريخ جيدًا قبل أي تسجيل.</p><button class="sec" data-act="today" style="width:100%;margin-bottom:10px">العودة لليوم</button>' : isAdmin() ? '<div class="row" style="margin-bottom:10px"><button data-act="unlock">فتح التعديل على هذا التاريخ</button><button class="sec" data-act="today">العودة لليوم</button></div>' : ''}`;
   const day = att.filter((a) => a.work_date === S.date);
   const rows = activeWorkers().map((w) => {
     const a = day.find((x) => x.worker_id === w.id), p = a?.status === 'present';
     const tag = !a ? '<span class="tag t-u">غير مسجل</span>' : p ? '<span class="tag t-p">حاضر</span>' : '<span class="tag t-a">غائب</span>';
     return `<div class="card"><div class="row"><b>${esc(w.full_name)}</b>${tag}</div>${a?.notes ? `<div class="muted">${esc(a.notes)}</div>` : ''}
-${isAdmin() ? `<div class="row" style="margin-top:8px"><button class="${p ? 'on' : 'sec'}" data-act="att" data-w="${w.id}" data-s="present">حاضر</button>
+${editable ? `<div class="row" style="margin-top:8px"><button class="${p ? 'on' : 'sec'}" data-act="att" data-w="${w.id}" data-s="present">حاضر</button>
 <button class="${a && !p ? 'red' : 'sec'}" data-act="att" data-w="${w.id}" data-s="absent">غائب</button>
 <button class="sec" data-act="att" data-w="${w.id}" data-s="unset">مسح</button></div>
 <div class="row" style="margin-top:6px"><button class="${a?.overtime ? 'on' : 'sec'}" data-act="ot" data-w="${w.id}" data-on="${a?.overtime ? 0 : 1}" ${p ? '' : 'disabled'}>${a?.overtime ? '✓ سهرة (إلغاء)' : 'سهرة'}</button>
 <button class="sec" data-act="note" data-w="${w.id}" ${a ? '' : 'disabled'}>ملاحظة</button></div>${p ? '' : '<div class="muted">السهرة تتطلب تسجيل الحضور أولًا.</div>'}` : ''}</div>`;
   }).join('');
-  return shell('الحضور اليومي', `${monthNav()}<div class="card cal">${cal}</div><h3>${S.date}</h3>${isAdmin() ? `<div class="row noprint" style="margin-bottom:10px"><button data-act="allpresent">الكل حاضر</button><button class="sec" data-act="copyprev">نسخ حضور اليوم السابق</button></div><p class="muted">«الكل حاضر» يسجّل غير المسجلين فقط، ولا يغيّر من سُجّل غائبًا. النسخ لا ينقل السهرات.</p>` : ''}${rows || '<p class="muted">لا يوجد عمال نشطون.</p>'}`);
+  return shell('الحضور اليومي', `${monthNav()}<div class="card cal">${cal}</div>${banner}${editable ? `<div class="row noprint" style="margin-bottom:10px"><button data-act="allpresent">الكل حاضر</button><button class="sec" data-act="copyprev">نسخ حضور اليوم السابق</button></div><p class="muted">«الكل حاضر» يسجّل غير المسجلين فقط، ولا يغيّر من سُجّل غائبًا. النسخ لا ينقل السهرات.</p>` : ''}${rows || '<p class="muted">لا يوجد عمال نشطون.</p>'}`);
 };
 
 const MONEY = {
@@ -135,7 +151,7 @@ V.money = async () => {
   const name = (id) => esc(S.workers.find((w) => w.id === id)?.full_name || '');
   return shell(c.title, `${monthNav()}${isAdmin() ? `<div class="card"><label>العامل</label><select id="m_w">${workerOpts()}</select>
 <label>المبلغ (ج.م)</label><input id="m_amt" type="number" inputmode="decimal" min="0.01" step="0.01">
-<label>التاريخ</label><input id="m_date" type="date" value="${S.date}">
+<label>التاريخ</label><input id="m_date" type="date" value="${today}" max="${today}">
 <label>${c.l1}</label><input id="m_t1">${c.t2 ? `<label>${c.l2}</label><input id="m_t2">` : ''}
 <button data-act="saveMoney" style="width:100%">حفظ</button></div>` : ''}
 <div class="card"><b>إجمالي الشهر: ${fmt(sum(rows, 'amount'))}</b></div>
@@ -207,16 +223,20 @@ V.backup = () => shell('النسخ الاحتياطي', `<div class="card"><h3>�
 <div class="card"><h3>استعادة</h3><p class="muted">الاستعادة آمنة للتكرار: السجلات الموجودة تُتجاهل ولا تتكرر.</p>
 <input type="file" id="bk_file" accept=".json"><label>كلمة المرور (إن كانت النسخة مشفرة)</label><input id="bk_pass2" type="password" dir="ltr"><button class="red" data-act="import" style="width:100%">استعادة</button></div>`);
 
-V.settings = () => shell('الإعدادات والتحديثات', `<div class="card"><p>الإصدار الحالي: <b>${esc(VERSION)}</b></p><button data-act="checkUpdate" style="width:100%">التحقق من وجود تحديث</button><div id="upd" style="margin-top:10px"></div></div>
-<div class="card"><p class="muted">الحساب: ${esc(S.email || '')} (${S.role === 'admin' ? 'مدير' : 'محاسب'})</p><button class="sec" data-act="reset2" style="width:100%;margin-bottom:8px">إرسال رابط تغيير كلمة المرور</button><button class="red" data-act="logout" style="width:100%">تسجيل الخروج</button></div>`);
+V.settings = () => shell('الإعدادات والتحديثات', `<div class="card"><p>الإصدار الحالي: <b>${esc(VERSION)}</b></p>
+<p class="muted">يتم تحديث التطبيق من داخله: الضغط على الزر ينزّل التحديث ويتحقق من توقيعه وبصمته ثم يثبّته، وبياناتك تبقى كما هي.</p>
+<button data-act="refresh" style="width:100%">🔄 التحقق من التحديثات وتثبيتها</button></div>
+<div class="card"><p class="muted">الحساب: ${esc(S.email || '')} (${S.role === 'admin' ? 'مدير' : 'محاسب'})</p><button class="sec" data-act="reset2" style="width:100%;margin-bottom:8px">إرسال رابط تغيير كلمة المرور</button><button class="red" data-act="logout" style="width:100%">تسجيل الخروج</button></div>
+<div class="card"><p class="muted">خيار متقدم: لو ظهرت مشكلة بعد تحديث، يمكن حذف التحديثات والعودة للنسخة المدمجة في التطبيق.</p><button class="sec" data-act="resetOta" style="width:100%">العودة للنسخة المدمجة</button></div>`);
 
 /* ---------- الأفعال ---------- */
 const val = (id) => document.getElementById(id)?.value.trim() ?? '';
 const A = {
   home: () => go('home'),
-  mprev: () => { S.ym = shiftMonth(S.ym.y, S.ym.m, -1); S.date = isoDate(S.ym.y, S.ym.m, 1); render(); },
-  mnext: () => { S.ym = shiftMonth(S.ym.y, S.ym.m, 1); S.date = isoDate(S.ym.y, S.ym.m, 1); render(); },
-  today: () => { S.date = today; S.ym = ymOf(today); render(); },
+  mprev: () => { S.ym = shiftMonth(S.ym.y, S.ym.m, -1); render(); },
+  mnext: () => { S.ym = shiftMonth(S.ym.y, S.ym.m, 1); render(); },
+  unlock: () => { if (confirm(`فتح التعديل على تاريخ سابق: ${dayName(S.date)} ${S.date}؟\nتأكد أن هذا هو التاريخ المقصود.`)) { S.unlocked = S.date; render(); } },
+  today: () => { S.date = today; S.ym = ymOf(today); S.unlocked = null; render(); },
   allpresent: () => { if (!confirm(`تسجيل كل العمال النشطين غير المسجلين «حاضر» ليوم ${S.date}؟`)) return;
     safe(async () => { const n = await ok(sb.rpc('mark_all_present', { p_date: S.date })); toast(n ? `تم تسجيل ${n} عامل حاضر` : 'لا يوجد عمال غير مسجلين'); render(); }); },
   copyprev: () => { const d = new Date(S.date + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - 1); const prev = d.toISOString().slice(0, 10);
@@ -246,7 +266,7 @@ const A = {
   note: (el) => { const n = prompt('ملاحظة اليوم'); if (n !== null) safe(async () => { await ok(sb.rpc('set_attendance_note', { p_worker: el.dataset.w, p_date: S.date, p_notes: n })); render(); }, 'تم الحفظ'); },
   saveMoney: () => safe(async () => {
     const c = MONEY[S.param], amt = val('m_amt');
-    if (!(+amt > 0)) throw new Error('اكتب مبلغًا صحيحًا'); if (!val('m_w')) throw new Error('اختر العامل'); if (!val('m_date')) throw new Error('اكتب التاريخ');
+    if (!(+amt > 0)) throw new Error('اكتب مبلغًا صحيحًا'); if (!val('m_w')) throw new Error('اختر العامل'); if (!val('m_date')) throw new Error('اكتب التاريخ'); if (val('m_date') > today) throw new Error('لا يمكن تسجيل تاريخ قادم');
     if (c.req1 && !val('m_t1')) throw new Error('سبب الخصم مطلوب');
     const rec = { id: S.formId, worker_id: val('m_w'), amount: amt, [c.dc]: val('m_date'), [c.t1]: val('m_t1') || null }; if (c.t2) rec[c.t2] = val('m_t2') || null;
     try { await ok(sb.from(S.param).insert(rec)); } catch (e) { if (e.code !== '23505') throw e; } // 23505: حُفظ سابقًا (إعادة إرسال)
@@ -274,30 +294,42 @@ const A = {
     const r = await ok(sb.rpc('restore_backup', { p_data: JSON.parse(txt) }));
     toast(`تمت الاستعادة: عمال ${r.workers}، حضور ${r.attendance}، سلف ${r.advances}، خصومات ${r.deductions}، مدفوعات ${r.payments}`);
   }),
-  checkUpdate: () => safe(async () => {
-    const box = document.getElementById('upd'); box.textContent = 'جارٍ التحقق...';
-    const url = `https://github.com/${REPO}/releases/latest/download/update.json`;
-    let man = Capacitor.isNativePlatform() ? (await CapacitorHttp.get({ url })).data : await (await fetch(url)).json();
-    if (typeof man === 'string') man = JSON.parse(man);
-    if (cmpVersion(man.version, VERSION) <= 0) { box.innerHTML = 'أنت على أحدث إصدار ✓'; return; }
-    window.__upd = man;
-    box.innerHTML = `<div class="warn">إصدار جديد: <b>${esc(man.version)}</b><br>${esc(man.notes || '')}</div><div class="muted" dir="ltr" style="word-break:break-all">SHA-256: ${esc(man.sha256)}</div>
-<button data-act="dlUpdate" style="width:100%;margin-top:8px">تنزيل APK والتحقق منه</button><div id="dls" class="muted"></div>`;
+  refresh: () => safe(async () => {
+    toast('جارٍ التحقق من التحديثات...');
+    const r = await otaCheck();
+    if (!r.newer) { toast('أنت على أحدث إصدار ✓'); render(); return; }
+    if (r.bad) { toast('هذا الإصدار فشل سابقًا على جهازك وتم تجاهله', true); return; }
+    await installUpdate(r);
   }),
-  dlUpdate: () => safe(async () => {
-    const man = window.__upd, st = document.getElementById('dls');
-    if (!Capacitor.isNativePlatform()) { st.textContent = 'التنزيل داخل التطبيق يعمل على Android فقط.'; return; }
-    if (!man.apkUrl.startsWith(`https://github.com/${REPO}/releases/download/`)) throw new Error('رابط التحديث غير موثوق');
-    st.textContent = 'جارٍ التنزيل...';
-    const res = await CapacitorHttp.get({ url: man.apkUrl, responseType: 'blob' });
-    st.textContent = 'جارٍ التحقق من سلامة الملف...';
-    const hash = await sha256Hex(b64ToBytes(res.data));
-    if (hash !== String(man.sha256).toLowerCase()) throw new Error('فشل التحقق: بصمة الملف لا تطابق. لا تقم بتثبيته.');
-    const name = `AhmedAtefWorkers-${man.version}.apk`;
-    await saveFile(name, res.data, true);
-    st.innerHTML = `✓ تم التحقق من الملف وحفظه في «المستندات». افتح تطبيق «الملفات» ثم المستندات وافتح <b>${esc(name)}</b> واضغط تثبيت. (Android سيطلب موافقتك؛ بياناتك تبقى كما هي لأن التحديث بنفس مفتاح التوقيع.)`;
-  }),
+  resetOta: () => { if (confirm('حذف التحديثات والعودة للنسخة المدمجة؟ بعدها أغلق التطبيق وافتحه من جديد.')) safe(async () => { await resetOta(); S.upd = null; }, 'تم. أغلق التطبيق تمامًا ثم افتحه'); },
 };
+
+/* ---------- التحديث من داخل التطبيق ---------- */
+async function otaCheck() {
+  const r = await checkOta({ repo: REPO, pubKey: PUBKEY, version: VERSION });
+  S.upd = r.newer && !r.bad ? r : null; return r;
+}
+const apkVersion = async () => (Capacitor.isNativePlatform() ? (await App.getInfo()).version : VERSION);
+async function installUpdate(r) {
+  const m = r.manifest;
+  if (m.minApk && cmpVersion(m.minApk, await apkVersion()) > 0) {
+    if (!m.apk) throw new Error('هذا التحديث يحتاج ملف APK جديدًا وغير متوفر.');
+    if (confirm(`الإصدار ${m.version} يحتاج تحديث ملف التطبيق نفسه.\nسيتم تنزيله والتحقق منه ثم فتح شاشة التثبيت (اضغط «تثبيت»).`)) await installApk(r);
+    return;
+  }
+  if (!confirm(`تثبيت التحديث ${m.version}؟\n${m.notes || ''}\nتبقى بياناتك كما هي وستُعاد تهيئة الشاشة.`)) return;
+  toast('جارٍ التنزيل والتحقق...'); await applyOta(r);
+}
+async function installApk(r) {
+  if (!Capacitor.isNativePlatform()) throw new Error('تثبيت APK يعمل على Android فقط.');
+  const a = r.manifest.apk; toast('جارٍ تنزيل الملف...');
+  const { bytes, b64 } = await fetchBytes(`${r.base}${a.name}`);
+  if ((await sha256Hex(bytes)) !== a.sha256) throw new Error('فشل التحقق: بصمة الملف لا تطابق. لم يُفتح للتثبيت.');
+  await Filesystem.writeFile({ path: `update/${a.name}`, directory: Directory.Cache, data: b64, recursive: true });
+  const { uri } = await Filesystem.getUri({ path: `update/${a.name}`, directory: Directory.Cache });
+  await FileOpener.open({ filePath: uri, contentType: 'application/vnd.android.package-archive', openWithDefault: true });
+  toast('تم التحقق من الملف. اضغط «تثبيت» في الشاشة التي ظهرت.');
+}
 
 /* ---------- التشغيل ---------- */
 let rendering = 0;
@@ -314,9 +346,8 @@ $app.addEventListener('click', (e) => {
   const a = e.target.closest('[data-act]'), g = e.target.closest('[data-go]');
   if (a) { e.preventDefault(); A[a.dataset.act]?.(a); } else if (g) go(g.dataset.go, g.dataset.p ?? null);
 });
-$app.addEventListener('input', (e) => { if (e.target.id === 'wq') { S.q = e.target.value; const p = e.target.selectionStart; render().then(() => { const i = document.getElementById('wq'); i?.focus(); i?.setSelectionRange(p, p); }); } });
+$app.addEventListener('input', (e) => { if (e.target.id === 'wq') { S.q = e.target.value; const l = document.getElementById('wlist'); if (l) l.innerHTML = workersList(); } }); // تحديث القائمة فقط: الحقل لا يُعاد بناؤه فلا تُغلق لوحة المفاتيح
 $app.addEventListener('change', (e) => {
-  if (e.target.id === 'dsel') { S.date = e.target.value; S.ym = ymOf(S.date); render(); }
   if (e.target.id === 'warch' || e.target.id === 'rarch') { S.showArchived = e.target.checked; render(); }
 });
 
@@ -328,4 +359,7 @@ async function boot() {
   if (!p) { await sb.auth.signOut(); S.role = null; render(); toast('هذا الحساب غير مصرح له بالدخول للتطبيق.', true); return; }
   S.role = p.role; S.email = data.session.user.email; go('home');
 }
-boot();
+boot().finally(() => {
+  otaBoot(VERSION).catch(() => {});   // وصلنا هنا = الحزمة الحالية تعمل: ثبّتها أو سجّل فشل السابقة
+  if (Capacitor.isNativePlatform() && PUBKEY) setTimeout(() => otaCheck().then(() => { if (S.upd && S.role && S.view === 'home') render(); }).catch(() => {}), 3000);
+});

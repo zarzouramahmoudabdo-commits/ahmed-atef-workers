@@ -1,11 +1,13 @@
 import { build } from 'esbuild';
-import { cpSync, mkdirSync, readFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
 const url = process.env.SUPABASE_URL || '';
 const key = process.env.SUPABASE_ANON_KEY || '';
 const repo = process.env.GITHUB_REPOSITORY || 'zarzouramahmoudabdo-commits/ahmed-atef-workers';
 const version = process.env.APP_VERSION || pkg.version;
+const pubKey = existsSync('ota-public.pem') ? readFileSync('ota-public.pem', 'utf8') : '';
+if (!pubKey) console.warn('تنبيه: لا يوجد ota-public.pem، التحديث من داخل التطبيق سيكون معطّلًا.');
 if (!url || !key) console.warn('تحذير: SUPABASE_URL / SUPABASE_ANON_KEY غير مضبوطين، الدخول لن يعمل.');
 
 mkdirSync('www', { recursive: true });
@@ -23,6 +25,7 @@ await build({
     __SUPABASE_ANON_KEY__: JSON.stringify(key),
     __APP_VERSION__: JSON.stringify(version),
     __REPO__: JSON.stringify(repo),
+    __OTA_PUBKEY__: JSON.stringify(pubKey),
   },
 });
 console.log('تم البناء في www/ (الإصدار ' + version + ')');

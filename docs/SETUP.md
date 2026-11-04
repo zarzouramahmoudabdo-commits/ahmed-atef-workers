@@ -4,7 +4,7 @@
 1. أنشئ مشروعًا جديدًا في supabase.com.
 2. **Authentication → Providers → Email**: عطّل «Allow new users to sign up» (لا إنشاء حسابات ذاتي).
 3. **Authentication → Users → Add user**: أنشئ حساب المدير (بريد + كلمة مرور). انسخ الـ UUID الخاص به.
-4. **SQL Editor**: شغّل الملفات بالترتيب: `supabase/migrations/001_schema.sql` ثم `002_rls.sql` ثم `003_functions.sql` ثم `004_bulk.sql`.
+4. **SQL Editor**: شغّل الملفات بالترتيب: `supabase/migrations/001_schema.sql` ثم `002_rls.sql` ثم `003_functions.sql` ثم `004_bulk.sql` ثم `005_no_future_dates.sql`.
 5. اجعله مديرًا (استبدل الـ UUID):
    ```sql
    insert into public.profiles(id, full_name, role) values ('UUID-هنا', 'المدير', 'admin');
@@ -51,3 +51,10 @@ gh secret set SUPABASE_ANON_KEY
 - التثبيت ليس صامتًا: التطبيق ينزّل APK ويتحقق من SHA-256 ويحفظه في «المستندات»، ثم تفتحه أنت من الملفات وتوافق على التثبيت.
 - استعادة كلمة المرور ترسل رابطًا من Supabase؛ إعداد صفحة إعادة التوجيه (Site URL) من لوحة Supabase مطلوب لتكتمل التجربة.
 - لم تُجرَّب على جهاز Android فعلي: الحفظ في المستندات، التنزيل داخل التطبيق، فتح WhatsApp، طباعة PDF.
+
+## 8) التحديث من داخل التطبيق (OTA)
+- مفاتيح التوقيع (مرة واحدة): `node scripts/gen-ota-keys.mjs` ثم `gh secret set OTA_PRIVATE_KEY < ota-private.pem` وارفع `ota-public.pem` فقط. احفظ نسخة خاصة من `ota-private.pem` ثم احذفه من الجهاز. لا تستبدل المفاتيح لاحقًا.
+- كل Tag (`v1.0.2`...) يبني APK + حزمة واجهة موقّعة (`ota-bundle.json` + `.sig`). الزر 🔄 في التطبيق ينزّل الحزمة، يتحقق من التوقيع (ECDSA P-256) وبصمة SHA-256 لكل ملف، ثم يبدّل الواجهة. تُثبَّت نهائيًا بعد أن تعمل بنجاح؛ وإلا يعود التطبيق للنسخة السابقة عند إعادة فتحه ويتجاهل تلك الحزمة.
+- التغييرات التي تحتاج APK جديدًا (إضافة إضافة Android أو صلاحية): ارفع `minApk` في `package.json`، فيحمّل التطبيق الـ APK ويتحقق من بصمته (من المانيفست الموقّع) ويفتح شاشة تثبيت Android. Android يمنع التثبيت الصامت، لذلك ضغطة «تثبيت» مطلوبة.
+- للعودة للنسخة المدمجة: الإعدادات ← «العودة للنسخة المدمجة» ثم أغلق التطبيق وافتحه.
+- لم يُجرَّب على جهاز فعلي بعد: تبديل الواجهة، وفتح مثبّت APK.

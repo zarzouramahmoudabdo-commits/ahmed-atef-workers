@@ -5,3 +5,4 @@ android/
 *.keystore
 .env
 .env.*
+ota-private.pem
