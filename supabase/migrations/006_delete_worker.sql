@@ -1,6 +1,15 @@
 -- حذف عامل نهائيًا (للمدير فقط). العامل بلا سجلات يُحذف مباشرة؛ العامل بسجلات يحتاج كتابة اسمه للتأكيد.
 -- كل صف محذوف يُسجَّل تلقائيًا في audit_logs (بياناته القديمة كاملة)، فلا يضيع أثره.
 
+-- تنظيف: أي نسخة قديمة بنفس الاسم وتوقيع مختلف تُحذف أولًا (تمنع خطأ "function name is not unique").
+do $$ declare r record; begin
+  for r in select p.oid::regprocedure as sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+           where n.nspname = 'public'
+             and ((p.proname = 'delete_worker' and p.oid::regprocedure::text <> 'delete_worker(uuid,text)')
+               or (p.proname = 'worker_delete_preview' and p.oid::regprocedure::text <> 'worker_delete_preview(uuid)'))
+  loop execute 'drop function ' || r.sig; end loop;
+end $$;
+
 create or replace function public.worker_delete_preview(p_worker uuid) returns jsonb
 language plpgsql stable security definer set search_path = public as $$
 begin
@@ -33,5 +42,5 @@ begin
   return r;
 end $$;
 
-revoke all on function public.worker_delete_preview, public.delete_worker from public, anon;
-grant execute on function public.worker_delete_preview, public.delete_worker to authenticated;
+revoke all on function public.worker_delete_preview(uuid), public.delete_worker(uuid, text) from public, anon;
+grant execute on function public.worker_delete_preview(uuid), public.delete_worker(uuid, text) to authenticated;
