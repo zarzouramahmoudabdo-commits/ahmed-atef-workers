@@ -66,3 +66,18 @@ test('كل الشاشات تُرسم بلا أخطاء (عميل Supabase وهم
   assert.equal(w.document.getElementById('dsel'), null); assert.ok(w.document.querySelector('[data-act="refresh"]'), 'زر 🔄 غير موجود');
   assert.deepEqual(errors, []);
 });
+
+test('شاشة الدخول: حقول بلا تصحيح تلقائي، إظهار كلمة المرور، وإعادة المحاولة بأرقام لاتينية', async () => {
+  const out = await build({ entryPoints: ['src/app.js'], bundle: true, write: false, format: 'iife', alias: { '@supabase/supabase-js': './tests/smoke/mock-supabase.js' },
+    define: { __SUPABASE_URL__: '"https://x.supabase.co"', __SUPABASE_ANON_KEY__: '"k"', __APP_VERSION__: '"1.2.3"', __REPO__: '"o/r"', __OTA_PUBKEY__: '""' } });
+  const dom = new JSDOM(readFileSync('src/index.html', 'utf8').replace('<script src="app.js"></script>', ''), { runScripts: 'outside-only', url: 'https://localhost/' });
+  const w = dom.window; w.__NO_SESSION = true; w.scrollTo = () => {}; w.crypto.randomUUID ??= () => 'id-' + Math.random();
+  w.eval(out.outputFiles[0].text); const wait = () => new Promise((r) => setTimeout(r, 60)); await wait();
+  const d = w.document, em = d.getElementById('em'), pw = d.getElementById('pw');
+  assert.equal(em.getAttribute('autocapitalize'), 'off'); assert.equal(pw.getAttribute('autocorrect'), 'off'); assert.match(d.body.textContent, /الإصدار 1\.2\.3/);
+  d.getElementById('showpw').checked = true; d.getElementById('showpw').dispatchEvent(new w.Event('change', { bubbles: true })); assert.equal(pw.type, 'text');
+  em.value = '\u200E Boss@Example.COM\u200F '; pw.value = 'abc١٢٣ ';
+  d.querySelector('[data-act="login"]').click(); await wait(); await wait();
+  const calls = w.__calls ?? globalThis.__calls; assert.equal(calls[0].email, 'boss@example.com');
+  assert.deepEqual(Array.from(calls, (c) => c.password), ['abc١٢٣ ', 'abc١٢٣', 'abc123']);
+});

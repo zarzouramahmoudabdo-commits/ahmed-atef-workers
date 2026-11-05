@@ -14,7 +14,7 @@ export function errMsg(e) {
   if (/row-level security|permission denied/i.test(m)) return 'غير مصرح لك بهذه العملية.';
   if (/deductions_reason_check/.test(m)) return 'سبب الخصم مطلوب.';
   if (/check constraint|violates/i.test(m)) return 'القيمة غير صحيحة أو تخالف قواعد الحسابات.';
-  if (/Invalid login/i.test(m)) return 'البريد أو كلمة المرور غير صحيحة.';
+  if (/Invalid login/i.test(m)) return 'البريد أو كلمة المرور غير صحيحة. تأكد من لوحة المفاتيح الإنجليزية وأنه لا توجد مسافة في آخر الكلمة.';
   return m || 'حدث خطأ غير متوقع';
 }
 export const errCode = (e) => (String(e?.message || '').match(/^[A-Z_]{4,}(?=:)/) || [''])[0];
@@ -45,4 +45,16 @@ export function cmpVersion(a, b) {
   const x = String(a).replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0), y = String(b).replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0);
   for (let i = 0; i < 3; i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d > 0 ? 1 : -1; }
   return 0;
+}
+
+// رموز غير مرئية تُنسخ مع النص من واتساب والرسائل (اتجاه الكتابة، مسافة بعرض صفر، مسافة غير منقسمة...).
+const INVISIBLE = /[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u00A0]/g;
+export const stripInvisible = (t) => String(t ?? '').replace(INVISIBLE, '').trim();
+export const cleanEmail = (t) => stripInvisible(t).toLowerCase();
+
+/** صيغ كلمة المرور المحتملة: كما كُتبت، ثم بدون مسافات ورموز مخفية (لصق من واتساب)، ثم بأرقام لاتينية (لوحات المفاتيح العربية تكتب ١٢٣). */
+export function passwordCandidates(raw) {
+  const latin = (t) => t.replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d));
+  const clean = stripInvisible(raw);
+  return [...new Set([raw, String(raw).trim(), clean, latin(clean)])].filter(Boolean);
 }

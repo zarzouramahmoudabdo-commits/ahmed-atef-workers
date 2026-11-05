@@ -4,7 +4,7 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { MONTHS_AR, daysInMonth, monthRange, shiftMonth, firstWeekday, cairoToday, ymOf, isoDate } from './lib/months.js';
 import { summarize, toCents, fmt } from './lib/finance.js';
 import { normalizePhone, buildStatementMessage, waLink } from './lib/whatsapp.js';
-import { esc, toast, errMsg, errCode, encryptText, decryptText, sha256Hex, cmpVersion } from './lib/ui.js';
+import { esc, toast, errMsg, errCode, encryptText, decryptText, sha256Hex, cmpVersion, passwordCandidates, cleanEmail } from './lib/ui.js';
 import { App } from '@capacitor/app';
 import { FileOpener } from '@capacitor-community/file-opener';
 import { checkOta, applyOta, otaBoot, resetOta, fetchBytes } from './lib/ota.js';
@@ -58,11 +58,16 @@ async function saveFile(name, text, base64 = false) {
 /* ---------- الشاشات ---------- */
 const V = {};
 V.login = () => `<header><h1>أحمد عاطف لإدارة العمال</h1></header><main><div class="card">
-<label>البريد الإلكتروني</label><input id="em" type="email" autocomplete="username" dir="ltr">
-<label>كلمة المرور</label><input id="pw" type="password" autocomplete="current-password" dir="ltr">
+<label>البريد الإلكتروني</label><input id="em" type="email" inputmode="email" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" dir="ltr">
+<label>كلمة المرور</label><input id="pw" type="password" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false" dir="ltr">
+<label style="display:flex;gap:8px;align-items:center;color:var(--tx)"><input type="checkbox" id="showpw" style="width:auto;margin:0"> إظهار كلمة المرور</label>
+<p class="muted">اكتب بلوحة المفاتيح الإنجليزية، والأرقام بالشكل 0-9.</p>
 <button data-act="login" style="width:100%">تسجيل الدخول</button>
 <p class="muted" style="text-align:center"><a href="#" data-act="reset">نسيت كلمة المرور؟</a></p></div>
-${configured ? '' : '<div class="warn">لم يتم ضبط إعدادات Supabase في هذا الإصدار.</div>'}</main>`;
+${configured ? '' : '<div class="warn">لم يتم ضبط إعدادات Supabase في هذا الإصدار.</div>'}
+<p class="muted" style="text-align:center">الإصدار ${esc(VERSION)}</p>
+<div id="updslot">${updBanner()}</div></main>`;
+const updBanner = () => (S.upd ? `<div class="warn" data-act="refresh" style="cursor:pointer">🔄 يوجد تحديث جديد (${esc(S.upd.manifest.version)}) — اضغط للتثبيت</div>` : '<p class="muted" style="text-align:center"><a href="#" data-act="refresh">🔄 التحقق من التحديثات</a></p>');
 
 V.home = async () => {
   const { y, m } = S.ym;
@@ -247,7 +252,15 @@ const A = {
     if (!confirm(`نسخ حضور وغياب ${prev} إلى ${S.date} للعمال غير المسجلين؟ (بدون السهرات)`)) return;
     safe(async () => { const n = await ok(sb.rpc('copy_attendance_from', { p_from: prev, p_to: S.date })); toast(n ? `تم نسخ ${n} سجل` : 'لا يوجد ما يُنسخ'); render(); }); },
   pick: (el) => { S.date = el.dataset.d; render(); },
-  login: () => safe(async () => { await ok(sb.auth.signInWithPassword({ email: val('em'), password: document.getElementById('pw').value })); await boot(); }),
+  login: () => safe(async () => {
+    const email = cleanEmail(document.getElementById('em').value); let last;
+    for (const password of passwordCandidates(document.getElementById('pw').value)) {
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if (!error) { await boot(); return; }
+      last = error; if (!/invalid login/i.test(error.message)) break;   // نعيد المحاولة بالصيغ البديلة فقط عند "بيانات غير صحيحة"
+    }
+    throw last || new Error('اكتب كلمة المرور');
+  }),
   reset: async () => { const e = prompt('اكتب بريدك الإلكتروني'); if (e) safe(async () => { await ok(sb.auth.resetPasswordForEmail(e)); }, 'إذا كان البريد مسجلًا ستصلك رسالة'); },
   reset2: () => safe(async () => { await ok(sb.auth.resetPasswordForEmail(S.email)); }, 'تم إرسال الرابط إلى بريدك'),
   logout: async () => { await sb.auth.signOut(); S.role = null; render(); },
@@ -371,6 +384,7 @@ $app.addEventListener('input', (e) => {
 }); // تحديث القائمة فقط: الحقل لا يُعاد بناؤه فلا تُغلق لوحة المفاتيح
 $app.addEventListener('change', (e) => {
   if (e.target.id === 'warch' || e.target.id === 'rarch') { S.showArchived = e.target.checked; render(); }
+  if (e.target.id === 'showpw') document.getElementById('pw').type = e.target.checked ? 'text' : 'password';
 });
 
 async function boot() {
@@ -383,5 +397,5 @@ async function boot() {
 }
 boot().finally(() => {
   otaBoot(VERSION).catch(() => {});   // وصلنا هنا = الحزمة الحالية تعمل: ثبّتها أو سجّل فشل السابقة
-  if (Capacitor.isNativePlatform() && PUBKEY) setTimeout(() => otaCheck().then(() => { if (S.upd && S.role && S.view === 'home') render(); }).catch(() => {}), 3000);
+  if (Capacitor.isNativePlatform() && PUBKEY) setTimeout(() => otaCheck().then(() => { if (!S.upd) return; if (S.role) { if (S.view === 'home') render(); } else { const u = document.getElementById('updslot'); if (u) u.innerHTML = updBanner(); } }).catch(() => {}), 3000);
 });
